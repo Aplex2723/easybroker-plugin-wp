@@ -1,0 +1,6 @@
+# Ignorar todos los archivos en el directorio actual
+*
+
+# Excepto el archivo m2bienesraices.php
+!m2bienesraices.php
+!.gitignore
