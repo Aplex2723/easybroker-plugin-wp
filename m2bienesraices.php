@@ -33,6 +33,19 @@ function mi_plugin_inmobiliario_activar() {
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);
+
+    //* Crando la tabla para los meta fields
+    $meta_table_name = $wpdb->prefix . 'ebp_meta_fields';
+
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE $meta_table_name (
+        id mediumint(9) NOT NULL AUTO_INCREMENT,
+        meta_field_key varchar(255) NOT NULL,
+        PRIMARY KEY  (id)
+    ) $charset_collate;";
+
+    dbDelta($sql);
 }
 
 // Función llamada al desactivar el plugin.
@@ -50,6 +63,16 @@ function mi_plugin_inmobiliario_menu() {
 
 // Función para mostrar la página de configuración del plugin.
 function mi_plugin_inmobiliario_config_page() {
+    wp_nonce_field('ebp_nonce_meta_fields', 'ebp_meta_fields_nonce');
+    // Obtén los meta fields almacenados
+    $meta_fields = get_option('ebp_meta_fields', []);
+
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'ebp_meta_fields';
+
+    // Recupera los meta fields de la base de datos
+    $meta_fields = $wpdb->get_results("SELECT id, meta_field_key FROM $table_name", OBJECT);
+
     ?>
     <div class="wrap">
         <h2>Configuración Plugin Inmobiliario</h2>
@@ -58,9 +81,36 @@ function mi_plugin_inmobiliario_config_page() {
             settings_fields('mi-plugin-inmobiliario-settings-group');
             do_settings_sections('mi-plugin-inmobiliario-config');
             ?>
+            <h3>Meta Fields</h3>
+            <table id="meta-fields-table">
+                <thead>
+                    <tr>
+                        <th>Meta Field Key</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($meta_fields as $field): ?>
+                    <tr>
+                        <td><input type="text" name="ebp_meta_fields[]" value="<?php echo esc_attr($field->meta_field_key); ?>" /></td>
+                        <td><button class="button remove-row" data-id="<?php echo esc_attr($field->id); ?>">Eliminar</button></td>
+                    </tr>
+                <?php endforeach; ?>
+                    <tr class="empty-row screen-reader-text">
+                        <td><input type="text" name="ebp_meta_fields[]" /></td>
+                        <td><button class="button remove-row">Eliminar</button></td>
+                    </tr>
+                </tbody>
+            </table>
+            <button id="add-row" class="button">Añadir Meta Field</button>
         </form>
-        <button type="button" id="obtener-propiedades">Obtener Propiedades</button>
-        <script type="text/javascript">
+        
+        <button type="button" id="obtener-propiedades" class="button-primary">Obtener Propiedades</button>
+        <button type="button" id="save-meta-fields" class="button-primary">Guardar Cambios</button>
+     
+        <!-- Aquí va tu script existente para obtener propiedades -->
+    </div>
+    <script type="text/javascript">
         jQuery(document).ready(function($) {
             $('#obtener-propiedades').click(function() {
                 var data = {
@@ -75,7 +125,80 @@ function mi_plugin_inmobiliario_config_page() {
             });
         });
         </script>
-    </div>
+    
+    <!-- Script para la gestion de contenido -->
+    <script type="text/javascript">
+    jQuery(document).ready(function($) {
+        $('#save-meta-fields').click(function(e) {
+            e.preventDefault();
+
+            var metaFields = [];
+            $("input[name='ebp_meta_fields[]']").each(function() {
+                metaFields.push($(this).val());
+            });
+
+            var data = {
+                'action': 'guardar_meta_fields_ajax',
+                'meta_fields': metaFields,
+                'nonce': $('#ebp_meta_fields_nonce').val()
+            };
+
+            $.post(ajaxurl, data, function(response) {
+                alert('Cambios guardados');
+                // Aquí puedes manejar la respuesta, como recargar la página para mostrar los cambios
+            });
+        });
+    });
+    </script>
+
+    <!-- Logica para eliminar los campos no deseados mas -->
+    <script type="text/javascript">
+    jQuery(document).ready(function($) {
+        $('.remove-row').on('click', function(e) {
+            e.preventDefault();
+
+            var row = $(this).closest('tr');
+            var id = $(this).data('id');
+
+            if(!id){
+                row.remove()
+            } else {
+                var data = {
+                    'action': 'ebp_eliminar_meta_field',
+                    'id': id,
+                    'nonce': $('#ebp_meta_fields_nonce').val()
+                };
+    
+                $.post(ajaxurl, data, function(response) {
+                    if (response.success) {
+                        row.remove();
+                        alert('Meta Field eliminado');
+                    } else {
+                        alert('Error al eliminar Meta Field');
+                    }
+                });
+            }
+
+        });
+    });
+    </script>
+
+    <!-- Anadir nueva fila script -->
+    <script type="text/javascript">
+    jQuery(document).ready(function($) {
+        $('#add-row').click(function(e) {
+            e.preventDefault();
+            var row = $('#meta-fields-table .empty-row').clone(true);
+            row.removeClass('empty-row screen-reader-text');
+            row.insertBefore('#meta-fields-table tbody>tr:last');
+        });
+        
+        $('.remove-row').click(function(e) {
+            e.preventDefault();
+            $(this).closest('tr').remove();
+        });
+    });
+    </script>
     <?php
 }
 
@@ -86,15 +209,71 @@ add_action('admin_init', 'mi_plugin_inmobiliario_settings');
 function mi_plugin_inmobiliario_settings() {
     register_setting('mi-plugin-inmobiliario-settings-group', 'mi_plugin_inmobiliario_api');
     register_setting('mi-plugin-inmobiliario-settings-group', 'mi_plugin_inmobiliario_api_key');
+    register_setting('mi-plugin-inmobiliario-settings-group', 'ebp_meta_fields', 'ebp_sanitize_meta_fields');
     // Registra aquí más configuraciones según sea necesario.
 
     add_settings_section('mi-plugin-inmobiliario-settings-section', 'Configuración API', 'mi_plugin_inmobiliario_settings_section_callback', 'mi-plugin-inmobiliario-config');
-
     add_settings_field('mi_plugin_inmobiliario_api', 'API a usar', 'mi_plugin_inmobiliario_api_callback', 'mi-plugin-inmobiliario-config', 'mi-plugin-inmobiliario-settings-section');
     add_settings_field('mi_plugin_inmobiliario_api_key', 'API Key', 'mi_plugin_inmobiliario_api_key_callback', 'mi-plugin-inmobiliario-config', 'mi-plugin-inmobiliario-settings-section');
     // Añade más campos de configuración según sea necesario.
 }
 
+//* Funcionalidad para los metafields personalizados
+function ebp_sanitize_meta_fields($input) {
+    // Sanitiza cada meta field
+    return array_map('sanitize_text_field', $input);
+}
+
+add_action('wp_ajax_guardar_meta_fields_ajax', 'ebp_guardar_meta_fields');
+
+function ebp_guardar_meta_fields() {
+    // Verifica el nonce por seguridad
+    check_ajax_referer('ebp_nonce_meta_fields', 'nonce');
+
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'ebp_meta_fields';
+    $meta_fields = isset($_POST['meta_fields']) ? $_POST['meta_fields'] : [];
+
+    // Vacía la tabla antes de insertar los nuevos valores
+    $wpdb->query("TRUNCATE TABLE $table_name");
+
+    // Inserta los nuevos valores
+    foreach ($meta_fields as $field) {
+        if (!empty($field)) { // Asegúrate de que el campo no esté vacío
+            $wpdb->insert($table_name, ['meta_field_key' => sanitize_text_field($field)]);
+        }
+    }
+
+    wp_send_json_success('Meta Fields guardados correctamente');
+}
+
+//* Eliminacion de Meta Fields ya no deseados
+add_action('wp_ajax_ebp_eliminar_meta_field', 'ebp_eliminar_meta_field');
+
+function ebp_eliminar_meta_field() {
+    // Verifica el nonce por seguridad
+    check_ajax_referer('ebp_nonce_meta_fields', 'nonce');
+
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('No tienes suficientes permisos para realizar esta acción');
+    }
+
+    $meta_field_id = isset($_POST['id']) ? intval($_POST['id']) : 0;
+
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'ebp_meta_fields';
+
+    $result = $wpdb->delete($table_name, array( 'id' => $meta_field_id ), array( '%d' ));
+
+    if ($result) {
+        wp_send_json_success('Meta Field eliminado correctamente');
+    } else {
+        wp_send_json_error('Error al eliminar Meta Field ' . $result );
+    }
+}
+
+
+//* Seccion de subtitulo encima de los campos
 function mi_plugin_inmobiliario_settings_section_callback() {
     echo 'Selecciona la API y configura las opciones necesarias.';
 }
